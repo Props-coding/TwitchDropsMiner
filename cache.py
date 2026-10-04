@@ -10,7 +10,7 @@ from typing import Dict, TypedDict, NewType, TYPE_CHECKING
 from utils import json_load, json_save
 from constants import URLType, CACHE_PATH, CACHE_DB
 
-from PIL import Image as Image_module
+from PIL import Image as Image_module, ImageChops, ImageDraw
 from PIL.ImageTk import PhotoImage
 
 
@@ -92,7 +92,22 @@ class ImageCache:
         bits = ''.join('1' if px >= avg_pixel else '0' for px in pixel_data)
         return ImageHash(f"{int(bits, 2):x}.png")
 
-    async def get(self, url: URLType, size: ImageSize | None = None) -> PhotoImage:
+    @staticmethod
+    def _round_corners(image: Image, radius: int) -> Image:
+        # supersampled mask for smooth, anti-aliased corners
+        ss = 4
+        mask = Image_module.new("L", (image.width * ss, image.height * ss), 0)
+        ImageDraw.Draw(mask).rounded_rectangle(
+            (0, 0, mask.width - 1, mask.height - 1), radius=radius * ss, fill=255
+        )
+        mask = mask.resize(image.size, Image_module.Resampling.LANCZOS)
+        rounded = image.convert("RGBA")
+        rounded.putalpha(ImageChops.multiply(rounded.getchannel("A"), mask))
+        return rounded
+
+    async def get(
+        self, url: URLType, size: ImageSize | None = None, *, radius: int = 0
+    ) -> PhotoImage:
         async with self._lock:
             image: Image | None = None
             if url in self._hashes:
@@ -115,8 +130,8 @@ class ImageCache:
                 except Exception:
                     pass
                 if image is None:
-                    # use a blank white image as a fallback
-                    image = Image_module.new("RGB", (10, 10), (255, 255, 255))
+                    # use a blank transparent image as a fallback
+                    image = Image_module.new("RGBA", (10, 10), (0, 0, 0, 0))
                 img_hash = self._hash(image)
                 self._images[img_hash] = image
                 image.save(CACHE_PATH / img_hash)
@@ -129,7 +144,7 @@ class ImageCache:
         self._altered = True
         if size is None:
             size = image.size
-        photo_key = (img_hash, size)
+        photo_key = (img_hash, size, radius)
         if photo_key in self._photos:
             return self._photos[photo_key]
         if image.size != size:
@@ -137,6 +152,8 @@ class ImageCache:
                 image = image.resize(size, Image_module.Resampling.LANCZOS)
             except OSError:
                 # broken image data surfaced during resize; fall back to blank placeholder
-                image = Image_module.new("RGB", size, (255, 255, 255))
+                image = Image_module.new("RGBA", size, (0, 0, 0, 0))
+        if radius > 0:
+            image = self._round_corners(image, radius)
         self._photos[photo_key] = photo = PhotoImage(master=self._root, image=image)
         return photo

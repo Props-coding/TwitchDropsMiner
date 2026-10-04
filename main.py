@@ -27,6 +27,7 @@ if __name__ == "__main__":
     from settings import Settings
     from version import __version__
     from exceptions import CaptchaRequired
+    from gui_kit import enable_dpi_awareness
     from utils import lock_file, resource_path, set_root_icon
     from constants import LOGGING_LEVELS, SELF_PATH, FILE_FORMATTER, LOG_PATH, LOCK_PATH
 
@@ -98,6 +99,7 @@ if __name__ == "__main__":
     # handle input parameters
     # NOTE: parser output is shown via message box
     # we also need a dummy invisible window for the parser
+    enable_dpi_awareness()
     root = tk.Tk()
     root.overrideredirect(True)
     root.withdraw()

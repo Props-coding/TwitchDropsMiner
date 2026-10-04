@@ -436,6 +436,8 @@ class Twitch:
         # State management
         self._state: State = State.IDLE
         self._state_change = asyncio.Event()
+        # set by the user to stop watching without exiting; not persisted between runs
+        self.paused: bool = False
         self.wanted_games: list[Game] = []
         self.inventory: list[DropsCampaign] = []
         self._drops: dict[str, TimedDrop] = {}
@@ -540,6 +542,18 @@ class Twitch:
         # this is identical to change_state, but defers the call
         # perfect for GUI usage
         return partial(self.change_state, state)
+
+    def set_paused(self, paused: bool) -> None:
+        """
+        Pauses or resumes mining. While paused, inventory fetches and drop claims still happen,
+        but no channel is being watched.
+        """
+        if paused == self.paused:
+            return
+        self.paused = paused
+        self.print(_("gui", "ui", "activity", "paused" if paused else "resumed"))
+        self.gui.paused_changed(paused)
+        self.change_state(State.CHANNEL_SWITCH)
 
     def close(self):
         """
@@ -841,6 +855,10 @@ class Twitch:
                 if self.settings.dump:
                     self.gui.close()
                     continue
+                if self.paused:
+                    # IDLE stops watching and waits for the next state change
+                    self.change_state(State.IDLE)
+                    continue
                 self.gui.status.update(_("gui", "status", "switching"))
                 # Change into the selected channel, stay in the watching channel,
                 # or select a new channel that meets the required conditions
@@ -1031,6 +1049,8 @@ class Twitch:
         )
 
     def watch(self, channel: Channel, *, update_status: bool = True):
+        if self.paused:
+            return
         self.gui.tray.change_icon("active")
         self.gui.channels.set_watching(channel)
         self.watching_channel.set(channel)

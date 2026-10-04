@@ -107,6 +107,15 @@ class _AuthState:
                 jar.clear()
                 COOKIES_PATH.unlink(missing_ok=True)
 
+    def _use_login_client(self) -> ClientInfo:
+        """
+        Switch to the client that can still perform new device code logins.
+        """
+        if self._twitch._client_type is not ClientType.SMARTBOX:
+            logger.info("Switching to the SmartBox client for a new login")
+            self._twitch._client_type = ClientType.SMARTBOX
+        return self._twitch._client_type
+
     def clear(self) -> None:
         self._delattrs(
             "user_id",
@@ -409,6 +418,7 @@ class _AuthState:
                             logger.info("Restored session is invalid")
                             assert client_info.CLIENT_URL.host is not None
                             jar.clear_domain(client_info.CLIENT_URL.host)
+                            client_info = self._use_login_client()
                             continue
                         elif response.status == 200:
                             validate_response = await response.json()
@@ -422,11 +432,18 @@ class _AuthState:
                 logger.info("Cookie client ID mismatch")
                 jar.clear()
                 COOKIES_PATH.unlink(missing_ok=True)
+                client_info = self._use_login_client()
             else:
                 raise RuntimeError("Login verification failure (step #1)")
             self.user_id = int(validate_response["user_id"])
             cookie["persistent"] = str(self.user_id)
             logger.info(f"Login successful, user ID: {self.user_id}")
+            if client_info is ClientType.SMARTBOX:
+                self._twitch.print(
+                    "Logged in with the SmartBox client. Twitch currently shows this client only "
+                    "the campaigns you've already made progress on - watch a stream on twitch.tv "
+                    "for a minute to start a new campaign, then reload."
+                )
             login_form.update(_("gui", "login", "logged_in"), self.user_id)
             # update our cookie and save it
             jar.update_cookies(cookie, client_info.CLIENT_URL)
@@ -452,8 +469,10 @@ class Twitch:
         # Do not modify the default, safe values.
         self._qgl_limiter = RateLimiter(capacity=5, window=1)
         # Client type, session and auth
-        # NOTE: Twitch rejects the Android app client ID for the device code login flow
-        self._client_type: ClientInfo = ClientType.SMARTBOX
+        # NOTE: Twitch no longer issues new Android app logins, but existing Android sessions
+        # still work and see the full campaign list. New logins go through the SmartBox client,
+        # see 'get_session' and '_AuthState._use_login_client'.
+        self._client_type: ClientInfo = ClientType.ANDROID_APP
         self._session: aiohttp.ClientSession | None = None
         self._auth_state: _AuthState = _AuthState(self)
         # GUI
@@ -482,6 +501,11 @@ class Twitch:
             # if loading in the cookies file ends up in an error, just ignore it
             # clear the jar, just in case
             cookie_jar.clear()
+        # reuse a saved Android app session if there is one, otherwise log in as a SmartBox
+        if "auth-token" in cookie_jar.filter_cookies(ClientType.ANDROID_APP.CLIENT_URL):
+            self._client_type = ClientType.ANDROID_APP
+        else:
+            self._client_type = ClientType.SMARTBOX
         # create timeouts
         # connection quality mulitiplier determines the magnitude of timeouts
         connection_quality = self.settings.connection_quality

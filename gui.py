@@ -1878,7 +1878,8 @@ class InventoryOverview:
             bar.body,
             clean(_("gui", "inventory", "filter", "refresh")),
             icon="refresh",
-            command=self.refresh,
+            # re-fetch campaigns from Twitch, so changes like newly linked accounts show up
+            command=manager._twitch.state_change(State.INVENTORY_FETCH),
         ).grid(column=7, row=0, sticky="e")
         self._scroll = ScrollArea(frame)
         self._scroll.grid(column=0, row=1, sticky="nsew")
